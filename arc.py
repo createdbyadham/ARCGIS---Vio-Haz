@@ -24,6 +24,10 @@ SAFE_RADIUS_M = 5500             # 5.5km - matches CAUTION threshold exactly
 MAX_VIO_SEVERITY = 1500.0        # 90th percentile cap for violations
 MAX_HAZ_SEVERITY = 20.0          # 90th percentile cap for hazards
 
+# Vehicle parameters (hardcoded for now)
+SPEED_KMH = 60.0                 # Vehicle speed in km/h
+DIRECTION_DEG = 0.0              # Vehicle heading in degrees (0=North, 90=East)
+
 # ==========================================
 # 3. HELPER FUNCTIONS
 # ==========================================
@@ -109,7 +113,7 @@ def calculate_risk_status(dist_m, severity, max_severity, labels):
 # ==========================================
 # 4. MAIN ANALYSIS FUNCTION
 # ==========================================
-def analyze_new_instance(lat, long, time_obj):
+def analyze_new_instance(lat, long, time_obj, speed_kmh=SPEED_KMH, direction_deg=DIRECTION_DEG):
     # --- VIOLATIONS ---
     vio_dist_deg, vio_dist_m, vio_severity, vio_danger_lat, vio_danger_long = get_nearest_from_knn(model_vio, lat, long)
     vio_safe_lat, vio_safe_long, vio_safe_dist = get_safe_location(lat, long, vio_danger_lat, vio_danger_long)
@@ -146,6 +150,12 @@ def analyze_new_instance(lat, long, time_obj):
     if safe_dist == 0:
         safe_lat, safe_long = lat, long
     
+    # --- CALCULATE ETA TO SAFETY ---
+    if safe_dist > 0 and speed_kmh > 0:
+        eta_minutes = (safe_dist / 1000) / speed_kmh * 60  # Convert to minutes
+    else:
+        eta_minutes = 0.0
+    
     # --- OVERALL STATUS (physical danger > tickets) ---
     status_label = "SAFE"
     message = []
@@ -167,6 +177,18 @@ def analyze_new_instance(lat, long, time_obj):
             status_label = "CAUTION"
         message.append(haz_msg)
     
+    # --- SPEED-AWARE WARNINGS ---
+    if haz_status == "DANGER" and speed_kmh > 30:
+        message.append(f"SLOW DOWN! Reduce speed to 30 km/h.")
+    elif haz_status == "CAUTION" and speed_kmh > 50:
+        message.append(f"Reduce speed to 50 km/h.")
+    elif vio_status == "WARNING" and speed_kmh > 40:
+        message.append(f"High enforcement area - reduce to 40 km/h.")
+    
+    # Add speed-aware ETA info to message if not safe
+    if safe_dist > 0:
+        message.append(f"At {speed_kmh:.0f} km/h, safety in {eta_minutes:.1f} min.")
+    
     if not message:
         message.append("Route appears clear.")
 
@@ -181,7 +203,10 @@ def analyze_new_instance(lat, long, time_obj):
         "Haz_Severity": haz_severity,
         "Safe_Lat": safe_lat,
         "Safe_Long": safe_long,
-        "Safe_Dist_m": safe_dist
+        "Safe_Dist_m": safe_dist,
+        "Speed_kmh": speed_kmh,
+        "Direction_deg": direction_deg,
+        "ETA_minutes": eta_minutes
     }
 
 # ==========================================
@@ -216,7 +241,7 @@ nj_waypoints = [
 # ========================================
 # SELECT WHICH PATH TO USE
 # ========================================
-USE_PATH = "MARYLAND"  # Change to "NJ" for hazard path
+USE_PATH = "NJ"  # Change to "NJ" for hazard path
 
 if USE_PATH == "MARYLAND":
     waypoints = md_waypoints
@@ -257,9 +282,9 @@ for i in range(len(full_lats)):
     lat = full_lats[i]
     long = full_longs[i]
     
-    report = analyze_new_instance(lat, long, current_time)
+    report = analyze_new_instance(lat, long, current_time, SPEED_KMH, DIRECTION_DEG)
     
-    # Format distance string like test5.py
+    # Format distance string
     safe_dist = report['Safe_Dist_m']
     if safe_dist < 1000:
         dist_str = f"{safe_dist:.0f} m"
@@ -271,13 +296,15 @@ for i in range(len(full_lats)):
     vio_score = report['Vio_Score']
     haz_status = report['Haz_Status']
     haz_score = report['Haz_Score']
+    eta_min = report['ETA_minutes']
     
-    # Build display text with both violation and hazard scoring
+    # Build display text with speed and ETA
     display_text = (
         f"STATUS: {report['Status']}\n"
         f"MSG: {report['Message']}\n"
+        f"SPEED: {report['Speed_kmh']:.0f} km/h | DIR: {report['Direction_deg']:.0f}°\n"
         f"SCORES: Vio: {vio_status} (Score: {vio_score:.1f}) | Haz: {haz_status} (Score: {haz_score:.1f})\n"
-        f"SAFE SPOT: Lat {report['Safe_Lat']:.4f}, Long {report['Safe_Long']:.4f} ({dist_str} away)"
+        f"SAFE SPOT: Lat {report['Safe_Lat']:.4f}, Long {report['Safe_Long']:.4f} ({dist_str} away, ETA: {eta_min:.1f} min)"
     )
     
     simulated_data.append({
@@ -285,6 +312,8 @@ for i in range(len(full_lats)):
         'Timestamp': current_time.isoformat(),
         'Latitude': lat,
         'Longitude': long,
+        'Speed_kmh': report['Speed_kmh'],
+        'Direction_deg': report['Direction_deg'],
         'Status': report['Status'],
         'Message': report['Message'],
         'Vio_Status': vio_status,
@@ -297,6 +326,7 @@ for i in range(len(full_lats)):
         'Safe_Lat': report['Safe_Lat'],
         'Safe_Long': report['Safe_Long'],
         'Safe_Dist': dist_str,
+        'ETA_minutes': round(eta_min, 1),
         'Display_Text': display_text
     })
     
