@@ -18,9 +18,15 @@ scaler_haz = joblib.load('scaler_hazard.joblib')
 # ==========================================
 # 2. CONSTANTS (all distances in METERS for consistency)
 # ==========================================
-DIST_THRESHOLD_DANGER_M = 1000   # 1km - inside this = DANGER/WARNING
-DIST_THRESHOLD_CAUTION_M = 5500  # 5.5km - inside this = CAUTION
-SAFE_RADIUS_M = 5500             # 5.5km - matches CAUTION threshold exactly
+# VIOLATION thresholds (keep original)
+VIO_DIST_DANGER_M = 1000    # 1km - inside this = WARNING
+VIO_DIST_CAUTION_M = 5500   # 5.5km - inside this = CAUTION
+
+# HAZARD thresholds (wider to catch more)
+HAZ_DIST_DANGER_M = 3000    # 3km - inside this = DANGER
+HAZ_DIST_CAUTION_M = 15000  # 15km - inside this = CAUTION
+
+SAFE_RADIUS_M = 15000       # Use max of both for safe location calc
 MAX_VIO_SEVERITY = 1500.0        # 90th percentile cap for violations
 MAX_HAZ_SEVERITY = 20.0          # 90th percentile cap for hazards
 
@@ -86,7 +92,7 @@ def get_nearest_from_knn(model, lat, long):
     
     return dist_deg, dist_m, severity, danger_lat, danger_long
 
-def calculate_risk_status(dist_m, severity, max_severity, labels):
+def calculate_risk_status(dist_m, severity, max_severity, labels, danger_thresh, caution_thresh):
     """
     Calculate status, score, and message based on distance (meters) and severity.
     labels: dict with keys 'danger', 'caution', 'far', 'danger_msg', 'caution_msg'
@@ -94,13 +100,13 @@ def calculate_risk_status(dist_m, severity, max_severity, labels):
     """
     severity_pct = min(100.0, (severity / max_severity) * 100.0)
     
-    if dist_m < DIST_THRESHOLD_DANGER_M:
+    if dist_m < danger_thresh:
         status = labels['danger']
         score = severity_pct
         msg = labels['danger_msg'].format(score=score)
-    elif dist_m < DIST_THRESHOLD_CAUTION_M:
+    elif dist_m < caution_thresh:
         status = labels['caution']
-        distance_factor = 1 - ((dist_m - DIST_THRESHOLD_DANGER_M) / (DIST_THRESHOLD_CAUTION_M - DIST_THRESHOLD_DANGER_M))
+        distance_factor = 1 - ((dist_m - danger_thresh) / (caution_thresh - danger_thresh))
         score = severity_pct * distance_factor
         msg = labels['caution_msg'].format(score=score)
     else:
@@ -125,7 +131,7 @@ def analyze_new_instance(lat, long, time_obj, speed_kmh=SPEED_KMH, direction_deg
         'danger_msg': 'High violation risk ({score:.0f}/100)!',
         'caution_msg': 'Approaching violation zone ({score:.0f}/100).'
     }
-    vio_status, vio_score, vio_msg = calculate_risk_status(vio_dist_m, vio_severity, MAX_VIO_SEVERITY, vio_labels)
+    vio_status, vio_score, vio_msg = calculate_risk_status(vio_dist_m, vio_severity, MAX_VIO_SEVERITY, vio_labels, VIO_DIST_DANGER_M, VIO_DIST_CAUTION_M)
     
     # --- HAZARDS ---
     haz_dist_deg, haz_dist_m, haz_severity, haz_danger_lat, haz_danger_long = get_nearest_from_knn(model_haz, lat, long)
@@ -138,7 +144,7 @@ def analyze_new_instance(lat, long, time_obj, speed_kmh=SPEED_KMH, direction_deg
         'danger_msg': 'CRITICAL: Hazard nearby!',
         'caution_msg': 'Approaching hazard zone.'
     }
-    haz_status, haz_score, haz_msg = calculate_risk_status(haz_dist_m, haz_severity, MAX_HAZ_SEVERITY, haz_labels)
+    haz_status, haz_score, haz_msg = calculate_risk_status(haz_dist_m, haz_severity, MAX_HAZ_SEVERITY, haz_labels, HAZ_DIST_DANGER_M, HAZ_DIST_CAUTION_M)
     
     # --- SAFE LOCATION (use worst case, or current location if already safe) ---
     if haz_safe_dist > vio_safe_dist:
@@ -277,9 +283,18 @@ violation_waypoints = [
 # Goes through physical hazard zone
 # ========================================
 hazard_waypoints = [
-    (32.014978, -104.491776),
-    (32.3903545, -104.2197176),      # Start: Before hazard
-    (32.5585287, -104.0786752)     # HAZARD ZONE (Risk: 24.19  # End: After hazard
+    (32.7222221, -102.6459223),
+    (32.6242845, -102.6459223),
+    (31.9627442, -102.4112418),
+    (31.8984056, -102.3172543),
+    (31.8991625, -102.3096854),
+    (31.9748515, -102.2498910),
+    (31.9990721, -102.1537659),
+    (31.9521448, -102.1386280),
+    (31.9831773, -102.0379616),
+    (32.0323752, -101.9895206),
+    (32.0505406, -101.9758965),
+    (32.1996481, -101.6080476)
 ]
 
 # ========================================
