@@ -221,130 +221,144 @@ def create_path(start_lat, start_long, end_lat, end_long, steps=50):
 # OPTION 1: MARYLAND PATH (Violation Detection)
 # Goes through high-risk violation areas
 # ========================================
-md_waypoints = [
-    (39.3316787, -77.0260512),
-    (39.2670390, -77.0449819),
-    (39.236276, -77.055702), 
-    (39.206928, -77.063714), 
+violation_waypoints = [
+    (38.9195596, -77.0252176),
+    (38.9328876, -77.0267795),
+    (38.9734972, -76.9964544),
+    (38.9816924, -76.9889000),  
+    (38.9917788, -76.9873021), 
+    (39.0027640, -76.9814767), 
+    (39.0191925, -76.9767990), 
+    (39.0202050, -76.9526073), 
+    
 ]
 
 # ========================================
 # OPTION 2: NEW JERSEY PATH (Hazard Detection)  
 # Goes through physical hazard zone
 # ========================================
-nj_waypoints = [
+hazard_waypoints = [
     (32.014978, -104.491776),
     (32.3903545, -104.2197176),      # Start: Before hazard
     (32.5585287, -104.0786752)     # HAZARD ZONE (Risk: 24.19  # End: After hazard
 ]
 
 # ========================================
-# SELECT WHICH PATH TO USE
+# RUN BOTH PATHS AND EXPORT BOTH CSVs
 # ========================================
-USE_PATH = "NJ"  # Change to "NJ" for hazard path
+paths_config = {
+    "violation": {
+        "waypoints": violation_waypoints,
+        "steps_per_segment": 20,
+        "description": "violation detection demo"
+    },
+    "hazard": {
+        "waypoints": hazard_waypoints,
+        "steps_per_segment": 30,
+        "description": "hazard detection demo"
+    }
+}
 
-if USE_PATH == "MARYLAND":
-    waypoints = md_waypoints
-    steps_per_segment = 20
-    print("Using MARYLAND path (violation detection demo)")
-else:
-    waypoints = nj_waypoints
-    steps_per_segment = 30
-    print("Using NEW JERSEY path (hazard detection demo)")
-
-# Build full path from waypoints
-full_lats = []
-full_longs = []
-for i in range(len(waypoints) - 1):
-    lats, longs = create_path(
-        waypoints[i][0], waypoints[i][1],
-        waypoints[i+1][0], waypoints[i+1][1],
-        steps_per_segment
-    )
-    if i > 0:  # Skip first point to avoid duplicates
-        lats = lats[1:]
-        longs = longs[1:]
-    full_lats.extend(lats)
-    full_longs.extend(longs)
-
-full_lats = np.array(full_lats)
-full_longs = np.array(full_longs)
-
-# ==========================================
-# 4. RUN SIMULATION & SAVE CSV
-# ==========================================
-simulated_data = []
-current_time = datetime.datetime(2025, 12, 12, 10, 0, 0)
-
-print(f"Simulating {len(full_lats)} points...")
-
-for i in range(len(full_lats)):
-    lat = full_lats[i]
-    long = full_longs[i]
+for path_name, config in paths_config.items():
+    print(f"\n{'='*50}")
+    print(f"Running {path_name} path ({config['description']})")
+    print('='*50)
     
-    report = analyze_new_instance(lat, long, current_time, SPEED_KMH, DIRECTION_DEG)
+    waypoints = config['waypoints']
+    steps_per_segment = config['steps_per_segment']
     
-    # Format distance string
-    safe_dist = report['Safe_Dist_m']
-    if safe_dist < 1000:
-        dist_str = f"{safe_dist:.0f} m"
-    else:
-        dist_str = f"{safe_dist/1000:.2f} km"
+    # Build full path from waypoints
+    full_lats = []
+    full_longs = []
+    for i in range(len(waypoints) - 1):
+        lats, longs = create_path(
+            waypoints[i][0], waypoints[i][1],
+            waypoints[i+1][0], waypoints[i+1][1],
+            steps_per_segment
+        )
+        if i > 0:  # Skip first point to avoid duplicates
+            lats = lats[1:]
+            longs = longs[1:]
+        full_lats.extend(lats)
+        full_longs.extend(longs)
     
-    # Extract scores
-    vio_status = report['Vio_Status']
-    vio_score = report['Vio_Score']
-    haz_status = report['Haz_Status']
-    haz_score = report['Haz_Score']
-    eta_min = report['ETA_minutes']
+    full_lats = np.array(full_lats)
+    full_longs = np.array(full_longs)
     
-    # Build display text with speed and ETA
-    display_text = (
-        f"STATUS: {report['Status']}\n"
-        f"MSG: {report['Message']}\n"
-        f"SPEED: {report['Speed_kmh']:.0f} km/h | DIR: {report['Direction_deg']:.0f}°\n"
-        f"SCORES: Vio: {vio_status} (Score: {vio_score:.1f}) | Haz: {haz_status} (Score: {haz_score:.1f})\n"
-        f"SAFE SPOT: Lat {report['Safe_Lat']:.4f}, Long {report['Safe_Long']:.4f} ({dist_str} away, ETA: {eta_min:.1f} min)"
-    )
+    # Run simulation
+    simulated_data = []
+    current_time = datetime.datetime(2025, 12, 12, 10, 0, 0)
     
-    simulated_data.append({
-        'Sequence': i,
-        'Timestamp': current_time.isoformat(),
-        'Latitude': lat,
-        'Longitude': long,
-        'Speed_kmh': report['Speed_kmh'],
-        'Direction_deg': report['Direction_deg'],
-        'Status': report['Status'],
-        'Message': report['Message'],
-        'Vio_Status': vio_status,
-        'Vio_Score': round(vio_score, 1),
-        'Vio_Severity': round(report['Vio_Severity'], 1),
-        'Haz_Status': haz_status,
-        'Haz_Score': round(haz_score, 1),
-        'Haz_Severity': round(report['Haz_Severity'], 2),
-        'Scores': f"Vio: {vio_status} ({vio_score:.1f}) | Haz: {haz_status} ({haz_score:.1f})",
-        'Safe_Lat': report['Safe_Lat'],
-        'Safe_Long': report['Safe_Long'],
-        'Safe_Dist': dist_str,
-        'ETA_minutes': round(eta_min, 1),
-        'Display_Text': display_text
-    })
+    print(f"Simulating {len(full_lats)} points...")
     
-    # Print progress for key status changes
-    if i == 0 or simulated_data[-1]['Status'] != simulated_data[-2]['Status']:
-        print(f"  Step {i}: {report['Status']} - Vio:{vio_status} ({vio_score:.0f}) | Haz:{haz_status} ({haz_score:.0f})")
+    for i in range(len(full_lats)):
+        lat = full_lats[i]
+        long = full_longs[i]
+        
+        report = analyze_new_instance(lat, long, current_time, SPEED_KMH, DIRECTION_DEG)
+        
+        # Format distance string
+        safe_dist = report['Safe_Dist_m']
+        if safe_dist < 1000:
+            dist_str = f"{safe_dist:.0f} m"
+        else:
+            dist_str = f"{safe_dist/1000:.2f} km"
+        
+        # Extract scores
+        vio_status = report['Vio_Status']
+        vio_score = report['Vio_Score']
+        haz_status = report['Haz_Status']
+        haz_score = report['Haz_Score']
+        eta_min = report['ETA_minutes']
+        
+        # Build display text with speed and ETA
+        display_text = (
+            f"STATUS: {report['Status']}\n"
+            f"MSG: {report['Message']}\n"
+            f"SPEED: {report['Speed_kmh']:.0f} km/h | DIR: {report['Direction_deg']:.0f}°\n"
+            f"SCORES: Vio: {vio_status} (Score: {vio_score:.1f}) | Haz: {haz_status} (Score: {haz_score:.1f})\n"
+            f"SAFE SPOT: Lat {report['Safe_Lat']:.4f}, Long {report['Safe_Long']:.4f} ({dist_str} away, ETA: {eta_min:.1f} min)"
+        )
+        
+        simulated_data.append({
+            'Sequence': i,
+            'Timestamp': current_time.isoformat(),
+            'Latitude': lat,
+            'Longitude': long,
+            'Speed_kmh': report['Speed_kmh'],
+            'Direction_deg': report['Direction_deg'],
+            'Status': report['Status'],
+            'Message': report['Message'],
+            'Vio_Status': vio_status,
+            'Vio_Score': round(vio_score, 1),
+            'Vio_Severity': round(report['Vio_Severity'], 1),
+            'Haz_Status': haz_status,
+            'Haz_Score': round(haz_score, 1),
+            'Haz_Severity': round(report['Haz_Severity'], 2),
+            'Scores': f"Vio: {vio_status} ({vio_score:.1f}) | Haz: {haz_status} ({haz_score:.1f})",
+            'Safe_Lat': report['Safe_Lat'],
+            'Safe_Long': report['Safe_Long'],
+            'Safe_Dist': dist_str,
+            'ETA_minutes': round(eta_min, 1),
+            'Display_Text': display_text
+        })
+        
+        # Print progress for key status changes
+        if i == 0 or simulated_data[-1]['Status'] != simulated_data[-2]['Status']:
+            print(f"  Step {i}: {report['Status']} - Vio:{vio_status} ({vio_score:.0f}) | Haz:{haz_status} ({haz_score:.0f})")
+        
+        current_time += datetime.timedelta(minutes=1)
     
-    current_time += datetime.timedelta(minutes=1)
+    # Save to CSV
+    df_sim = pd.DataFrame(simulated_data)
+    output_file = f'Car_Simulation_{path_name}.csv'
+    df_sim.to_csv(output_file, index=False)
+    
+    print(f"\nSaved: {output_file}")
+    print(f"Total points: {len(df_sim)}")
+    print(f"Status distribution:")
+    print(df_sim['Status'].value_counts().to_string())
 
-# SAVE TO CSV
-df_sim = pd.DataFrame(simulated_data)
-output_file = f'Car_Simulation_{USE_PATH}.csv'
-df_sim.to_csv(output_file, index=False)
-
-# Also save as the generic name
-df_sim.to_csv('Car_Simulation_Results.csv', index=False)
-
-print(f"\nDone! Saved: {output_file} (and Car_Simulation_Results.csv)")
-print(f"Total points: {len(df_sim)}")
-print(f"\nStatus distribution:")
-print(df_sim['Status'].value_counts().to_string())
+print(f"\n{'='*50}")
+print("Done! Exported both Car_Simulation_violation.csv and Car_Simulation_hazard.csv")
+print('='*50)
