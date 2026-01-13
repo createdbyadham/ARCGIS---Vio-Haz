@@ -217,6 +217,45 @@ def create_path(start_lat, start_long, end_lat, end_long, steps=50):
     longs = np.linspace(start_long, end_long, steps)
     return lats, longs
 
+def build_path_equal_spacing(waypoints, target_spacing_m=200):
+    """
+    Build a path from waypoints with equal spacing between all points.
+    target_spacing_m: desired distance between consecutive points in meters
+    """
+    # Calculate distance for each segment
+    segment_distances = []
+    for i in range(len(waypoints) - 1):
+        dist = haversine_meters(
+            waypoints[i][0], waypoints[i][1],
+            waypoints[i+1][0], waypoints[i+1][1]
+        )
+        segment_distances.append(dist)
+    
+    total_distance = sum(segment_distances)
+    
+    # Calculate steps per segment based on distance
+    full_lats = []
+    full_longs = []
+    
+    for i in range(len(waypoints) - 1):
+        # Steps proportional to segment distance
+        steps = max(2, int(segment_distances[i] / target_spacing_m) + 1)
+        
+        lats, longs = create_path(
+            waypoints[i][0], waypoints[i][1],
+            waypoints[i+1][0], waypoints[i+1][1],
+            steps
+        )
+        
+        if i > 0:  # Skip first point to avoid duplicates
+            lats = lats[1:]
+            longs = longs[1:]
+        
+        full_lats.extend(lats)
+        full_longs.extend(longs)
+    
+    return np.array(full_lats), np.array(full_longs), total_distance, segment_distances
+
 # ========================================
 # OPTION 1: MARYLAND PATH (Violation Detection)
 # Goes through high-risk violation areas
@@ -249,12 +288,12 @@ hazard_waypoints = [
 paths_config = {
     "violation": {
         "waypoints": violation_waypoints,
-        "steps_per_segment": 20,
+        "spacing_m": 200,  # 200m between points
         "description": "violation detection demo"
     },
     "hazard": {
         "waypoints": hazard_waypoints,
-        "steps_per_segment": 30,
+        "spacing_m": 500,  # 500m between points (longer route)
         "description": "hazard detection demo"
     }
 }
@@ -265,25 +304,15 @@ for path_name, config in paths_config.items():
     print('='*50)
     
     waypoints = config['waypoints']
-    steps_per_segment = config['steps_per_segment']
+    spacing_m = config['spacing_m']
     
-    # Build full path from waypoints
-    full_lats = []
-    full_longs = []
-    for i in range(len(waypoints) - 1):
-        lats, longs = create_path(
-            waypoints[i][0], waypoints[i][1],
-            waypoints[i+1][0], waypoints[i+1][1],
-            steps_per_segment
-        )
-        if i > 0:  # Skip first point to avoid duplicates
-            lats = lats[1:]
-            longs = longs[1:]
-        full_lats.extend(lats)
-        full_longs.extend(longs)
+    # Build full path with equal spacing
+    full_lats, full_longs, total_dist, seg_dists = build_path_equal_spacing(waypoints, spacing_m)
     
-    full_lats = np.array(full_lats)
-    full_longs = np.array(full_longs)
+    print(f"Total path distance: {total_dist/1000:.2f} km")
+    print(f"Target spacing: {spacing_m}m -> {len(full_lats)} points")
+    for i, d in enumerate(seg_dists):
+        print(f"  Segment {i+1}: {d/1000:.2f} km")
     
     # Run simulation
     simulated_data = []
